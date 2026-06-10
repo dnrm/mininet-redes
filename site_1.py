@@ -114,9 +114,14 @@ class SiteOne:
         # --- Bring up DHCP clients ---
         for host, intf in self.dhcp_clients:
             host.cmd('ip link set %s up' % intf)
-            host.cmd('timeout 10 dhclient -1 %s' % intf)
-            # Refresh Mininet's cached IP so commands like pingAll work
-            host.intf(intf).updateIP()
+            # Right after net.start() the OVS switches/ports may still be
+            # settling, so a single short dhclient attempt can time out.
+            # Retry a few times before giving up.
+            for attempt in range(3):
+                host.cmd('timeout 15 dhclient -1 %s' % intf)
+                host.intf(intf).updateIP()
+                if host.intf(intf).ip:
+                    break
 
     def cleanup(self, net):
         for host, intf in self.dhcp_clients:
