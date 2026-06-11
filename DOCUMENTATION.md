@@ -127,8 +127,12 @@ range. `dnsmasq`:
 - `dhcp-authoritative` lets it answer immediately in this isolated lab
   network (no other DHCP servers to defer to).
 
-End hosts run `dhclient -nw <intf>` once their dnsmasq is up, and receive an
-address, gateway and DNS server appropriate to their VLAN.
+End hosts run `dhclient -1 <intf>` (single-attempt, blocking) once their
+dnsmasq is up, and receive an address, gateway and DNS server appropriate to
+their VLAN. Right after `net.start()` the OVS switches/ports may still be
+settling, so each client retries up to 3 times (15s timeout each) before
+giving up. After each attempt, `Intf.updateIP()` refreshes Mininet's cached
+IP so commands like `pingall` and `IP()` see the address immediately.
 
 HQ's `hHQdns` only serves DHCP for **Empleados / Visitantes / Surveillance
 SR** — the Servers VLAN is fully static (db/files/web/dns all have fixed
@@ -191,7 +195,10 @@ site_2/
   for `rHQ`, `rS1`, `rS2`.
 - **`SwitchL3(OVSSwitch)`** — provided abstraction for an L3-capable switch
   (kept for completeness/future use); the per-VLAN switches in this design
-  are plain L2 switches.
+  are plain L2 switches. It defaults to `failMode='standalone'`: with
+  `controller=None`, OVS switches normally default to `fail_mode='secure'`
+  and drop all traffic with no flows installed, so `standalone` makes every
+  per-VLAN switch behave like a normal MAC-learning switch.
 - **`DNSDHCPServer(Node)`** — a host that wraps starting/stopping `dnsmasq`
   with a given config file (`start_dnsmasq()` / `stop_dnsmasq()`), used for
   `hHQdns`, `hS1dns`, `hS2dns`.
@@ -221,10 +228,17 @@ its router), and cross-site (via HQ).
 
 Targeted checks:
 ```
-hS1sl1 ping -c2 hS1gst1     # cross-VLAN, Site 1
-hS1sl1 ping -c2 hS2sl1      # cross-site, via HQ
-hHQemp1 ping -c2 hHQdb      # HQ employee -> HQ server
+hS1sl1 ping -c2 hS1gst1                # cross-VLAN, Site 1
+hS1sl1 ping -c2 hS2sl1.site2.local     # cross-site, via HQ
+hHQemp1 ping -c2 hHQdb                 # HQ employee -> HQ server
 ```
+
+> **Note on cross-site names:** DHCP only configures each host with its own
+> site's search domain (e.g. `site1.local` for Site 1 hosts), so a *short*
+> name like `hS2sl1` from a Site 1 host resolves as `hS2sl1.site1.local`
+> (which doesn't exist) and fails with "Name or service not known". Use the
+> **FQDN** (`hS2sl1.site2.local`) — see [Section 6](#6-why-it-works--dns-hierarchy)
+> for how that query is forwarded to HQ and then to Site 2's `dnsmasq`.
 
 ### 9.2 DHCP
 
@@ -279,6 +293,12 @@ before calling `net.stop()`. If a previous run was killed abnormally and
 left `dnsmasq` processes or mounts behind, run:
 
 ```bash
-sudo mn -c
 sudo pkill dnsmasq
+sudo mn -c
 ```
+
+before starting `wan.py` again. Leftover `dnsmasq` processes from a crashed
+run can hold the DHCP/DNS sockets on a VLAN's interfaces, which causes the
+*new* `dnsmasq` to fail to bind and DHCP clients in that VLAN to time out
+with no IP address — symptoms that look like a routing/switch problem but
+are actually just stale state from a previous run.
