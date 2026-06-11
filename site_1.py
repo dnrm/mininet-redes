@@ -91,6 +91,14 @@ class SiteOne:
         # Hub-and-spoke: everything not local goes to HQ
         rS1.cmd('ip route add default via %s' % self.WAN_REMOTE_IP)
 
+        # --- Firewall: VLAN isolation policy (FORWARD chain, default ACCEPT) ---
+        # Guests (10.0.11.0/24) cannot reach Sales or Management (10.0.10.0/24)
+        rS1.cmd('iptables -A FORWARD -s 10.0.11.0/24 -d 10.0.10.0/24 -j DROP')
+        # Surveillance (10.0.12.0/24) cannot reach Sales (10.0.10.0/25)
+        rS1.cmd('iptables -A FORWARD -s 10.0.12.0/24 -d 10.0.10.0/25 -j DROP')
+        # Surveillance cannot leave the site over the WAN link
+        rS1.cmd('iptables -A FORWARD -s 10.0.12.0/24 -o s1-hq -j DROP')
+
         # --- DHCP/DNS server addresses (one per VLAN) ---
         dns.setIP('10.0.10.2/25', intf='hS1dns-eth0')    # Sales
         dns.setIP('10.0.10.130/25', intf='hS1dns-eth1')  # Management

@@ -164,6 +164,10 @@ class SiteHQ:
         for subnet in self.SITE2_SUBNETS:
             rHQ.cmd('ip route add %s via %s' % (subnet, self.S2_NEXTHOP))
 
+        # --- Firewall: VLAN isolation policy (FORWARD chain, default ACCEPT) ---
+        # Visitantes (10.0.19.0/24) cannot reach Empleados (10.0.18.0/24)
+        rHQ.cmd('iptables -A FORWARD -s 10.0.19.0/24 -d 10.0.18.0/24 -j DROP')
+
         # --- Static servers in the Servers VLAN ---
         hHQdb.setIP('10.0.17.66/26')
         hHQdb.setDefaultRoute('via 10.0.17.65')
